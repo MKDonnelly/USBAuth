@@ -1,0 +1,44 @@
+#!/bin/bash
+
+#Ouput file will be in the form
+#"# <drive uuid>
+#hhhhhhhhhhhaaaaaaaaaaassssssssssshhhhhhhhh .usbkey"
+
+if [[ "$1" == "help" || "$1" == "" || "$2" == "" ]]
+then
+   echo \
+   'Parameters:
+      $1 = Drive name
+      $2 = Key output name
+      $3 = Key Length'
+   exit
+fi
+
+driveName=$1
+outputName=$2
+keyLength=$3
+
+#Get the drive uuid
+driveUUID=$( blkid | grep $driveName | cut -f 2 -d ' ' )
+
+#Place the drive uuid into the file
+echo "# $driveUUID" > $outputName
+
+#Create a .usbkey file in the specified partition
+#and save its sha512 hash
+tempDir=$( mktemp -d 'temp.XXXXX' )
+mount $driveName $tempDir
+
+#Generate a random string to place in the .usbkey file
+#(the second head command is not strictly needed, but adds
+#to security since it enlarges the key size)
+head -c $keyLength /dev/urandom > .usbkey
+
+#Generate the hash
+sha512sum .usbkey >> $outputName
+
+#Move the .usbkey file generated into the partition
+mv -f .usbkey $tempDir
+
+umount $tempDir
+rmdir $tempDir

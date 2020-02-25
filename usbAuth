@@ -1,0 +1,82 @@
+#!/bin/bash
+
+if [[ "$1" == "help" || "$1" == "" || "$2" == "" || "$3" == "" ]]
+then
+   echo \
+   'Parameters:
+      $1 = Keyfile, the file with the authentic key
+      $2 = Command to run when authenticated
+      $3 = Command to run when deauthenticated
+      $4 = Maximum Delay'
+   exit
+fi
+
+authCmd=$2
+deauthCmd=$3
+
+#Sets the delay in the authentication loop.
+#Lower values are more responsive, but consume
+#more cpu and visa versa
+maxDelay=$4
+
+#Grab the uuid to search for in the key file
+usbuuidtolookfor=$( cat $1 | head -1 | cut -f 2 -d ' ' )
+
+while [ 1 ]
+do
+   #Until the drive is inserted, the if statement will be passed
+   blkid | grep "$usbuuidtolookfor" > /dev/null 
+
+   #Once the drive is inserted, the program will stay within
+   #this if statement
+   if [[ "$?" == "0" ]]
+   then
+
+      #Get partition name from uuid
+      usbpartitionname=$( blkid | grep $usbuuidtolookfor | cut -f 1 -d ' ' | sed 's/://g' )
+
+      #Create temporary directory to mount drive
+      tempDir=$( mktemp -d 'temp.XXXXX' )
+      mount $usbpartitionname $tempDir
+
+      #Copy the .usbkey file into the current directory
+      #Force it in case there is a previous key that was not removed
+      cp -f ${tempDir}/.usbkey .
+
+      #This is where the key is determined to be valid or invalid
+      sha512sum --status -c $1
+      if [[ "$?" == "0" ]]
+      then
+         #Execute authentication command if authenticated
+         $authCmd 
+         authenticated="1"
+      else
+         #This is run if the key is not the same
+         echo key is not authentic!
+      fi
+
+      #Unmount the drive, remove the temporary file, and delete .usbkey
+      umount $tempDir
+      rmdir $tempDir
+      \rm .usbkey    
+
+      #Only watch for when the drive is unplugged when it has
+      #been authenticated
+      if [[ "$authenticated" == "1" ]]
+      then
+         #Wait for the drive to be removed 
+         blkid | grep $usbuuidtolookfor > /dev/null 
+         while [[ "$?" == "0" ]]
+         do
+             sleep $maxDelay
+             blkid | grep $usbuuidtolookfor > /dev/null
+         done
+
+         #Run deauthenticated command once usb drive
+         #is removed
+         $deauthCmd 
+      fi
+   fi
+   sleep $maxDelay
+done
+
